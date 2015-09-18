@@ -5,8 +5,6 @@ from __future__ import print_function
 import sys
 from itertools import count
 from collections import Counter, OrderedDict, namedtuple
-import re
-import datetime
 
 # The table size is the maximum number of elements in the transposition table.
 TABLE_SIZE = 1e6
@@ -14,10 +12,10 @@ TABLE_SIZE = 1e6
 # This constant controls how much time we spend on looking for optimal moves.
 NODES_SEARCHED = 1e4
 
-# Mate value must be greater than 8*queen + 2*(rook+knight+bishop)z1
+# Mate value must be greater than 8*queen + 2*(rook+knight+bishop)
 # King value is set to twice this value such that if the opponent is
 # 8 queens up, but we got the king, we still exceed MATE_VALUE.
-MATE_VALUE = 9000
+MATE_VALUE = 30000
 
 # Our board is represented as a 120 character string. The padding allows for
 # fast detection of moves that don't stay within the board.
@@ -33,22 +31,6 @@ initial = (
     ' ........\n'  #  70 - 79
     ' PPPPPPPP\n'  #  80 - 89
     ' RNBQKBNR\n'  #  90 - 99
-    '         \n'  # 100 -109
-    '          '   # 110 -119
-)
-
-
-initial2 = (
-    '         \n'  #   0 -  9
-    '         \n'  #  10 - 19
-    ' .......K\n'  #  20 - 29
-    ' ........\n'  #  30 - 39
-    ' k.P.....\n'  #  40 - 49
-    ' .......p\n'  #  50 - 59
-    ' ........\n'  #  60 - 69
-    ' ........\n'  #  70 - 79
-    ' ........\n'  #  80 - 89
-    ' ........\n'  #  90 - 99
     '         \n'  # 100 -109
     '          '   # 110 -119
 )
@@ -144,20 +126,11 @@ pst = {
 }
 
 
-weights = {'Mobility': 10,
-               'P': 100,
-               'N': 320,
-               'B': 330,
-               'R': 500,
-               'Q': 900,
-               'K': 20000
-               }
-
 ###############################################################################
 # Chess logic
 ###############################################################################
 
-class Position(namedtuple('Position', 'board score wc bc ep kp turn')):
+class Position(namedtuple('Position', 'board score wc bc ep kp')):
     """ A state of a chess game
     board -- a 120 char representation of the board
     score -- the board evaluation
@@ -172,65 +145,32 @@ class Position(namedtuple('Position', 'board score wc bc ep kp turn')):
         # as defined in the 'directions' map. The rays are broken e.g. by
         # captures or immediately in case of pieces such as knights.
         for i, p in enumerate(self.board):
-            if not p.isupper():
-                continue
+            if not p.isupper(): continue
             for d in directions[p]:
                 for j in count(i+d, d):
                     q = self.board[j]
                     # Stay inside the board
-                    if self.board[j].isspace():
-                        break
+                    if self.board[j].isspace(): break
                     # Castling
-                    if (i == A1 or i == A8) and q == 'K' and self.wc[0]:
-                        yield (j, j-2)
-                    if (i == H1 or i == H8) and q == 'K' and self.wc[1]:
-                        yield (j, j+2)
+                    if i == A1 and q == 'K' and self.wc[0]: yield (j, j-2)
+                    if i == H1 and q == 'K' and self.wc[1]: yield (j, j+2)
                     # No friendly captures
-                    if q.isupper():
-                        break
-                    # special king stuff: no suicidal
-                    if p == 'K' and self.board[j+N] in ['q', 'k', 'r']:
-                        break
-                    if p == 'K' and self.board[j+S] in ['q', 'k', 'r']:
-                        break
-                    if p == 'K' and self.board[j+E] in ['q', 'k', 'r']:
-                        break
-                    if p == 'K' and self.board[j+W] in ['q', 'k', 'r']:
-                        break
-                    if p == 'K' and self.board[j+W+N] in ['q', 'k', 'b', 'p']:
-                        break
-                    if p == 'K' and self.board[j+E+N] in ['q', 'k', 'b', 'p']:
-                        break
-                    if p == 'K' and self.board[j+E+S] in ['q', 'k', 'b']:
-                        break
-                    if p == 'K' and self.board[j+W+S] in ['q', 'k', 'b']:
-                        break
-                    # this is not considering to be in the line of a queen, bishop or rook, or in the range of a knight
+                    if q.isupper(): break
                     # Special pawn stuff
-                    if p == 'P' and d in (N+W, N+E) and q == '.' and j not in (self.ep, self.kp):
-                        break
-                    if p == 'P' and d in (N, 2*N) and q != '.':
-                        break
-                    if p == 'P' and d == 2*N and (i < A1+N or self.board[i+N] != '.'):
-                        break
+                    if p == 'P' and d in (N+W, N+E) and q == '.' and j not in (self.ep, self.kp): break
+                    if p == 'P' and d in (N, 2*N) and q != '.': break
+                    if p == 'P' and d == 2*N and (i < A1+N or self.board[i+N] != '.'): break
                     # Move it
                     yield (i, j)
                     # Stop crawlers from sliding
-                    if p in ('P', 'N', 'K'):
-                        break
+                    if p in ('P', 'N', 'K'): break
                     # No sliding after captures
-                    if q.islower():
-                        break
+                    if q.islower(): break
 
     def rotate(self):
-        turn = self.turn
-        if turn == 'white':
-            turn = 'black'
-        else:
-            turn = 'white'
         return Position(
             self.board[::-1].swapcase(), -self.score,
-            self.bc, self.wc, 119-self.ep, 119-self.kp, turn)
+            self.bc, self.wc, 119-self.ep, 119-self.kp)
 
     def move(self, move):
         i, j = move
@@ -239,20 +179,15 @@ class Position(namedtuple('Position', 'board score wc bc ep kp turn')):
         # Copy variables and reset ep and kp
         board = self.board
         wc, bc, ep, kp = self.wc, self.bc, 0, 0
-        # score = self.score + self.value(move)
+        score = self.score + self.value(move)
         # Actual move
         board = put(board, j, board[i])
         board = put(board, i, '.')
-        score = self.evaluate()
         # Castling rights
-        if i == A1:
-            wc = (False, wc[1])
-        if i == H1:
-            wc = (wc[0], False)
-        if j == A8:
-            bc = (bc[0], False)
-        if j == H8:
-            bc = (False, bc[1])
+        if i == A1: wc = (False, wc[1])
+        if i == H1: wc = (wc[0], False)
+        if j == A8: bc = (bc[0], False)
+        if j == H8: bc = (False, bc[1])
         # Castling
         if p == 'K':
             wc = (False, False)
@@ -269,7 +204,7 @@ class Position(namedtuple('Position', 'board score wc bc ep kp turn')):
             if j - i in (N+W, N+E) and q == '.':
                 board = put(board, j+S, '.')
         # We rotate the returned position, so it's ready for the next player
-        return Position(board, score, wc, bc, ep, kp, self.turn).rotate()
+        return Position(board, score, wc, bc, ep, kp).rotate()
 
     def value(self, move):
         i, j = move
@@ -294,39 +229,7 @@ class Position(namedtuple('Position', 'board score wc bc ep kp turn')):
                 score += pst['P'][j+S]
         return score
 
-    def evaluate(self):
-        white_pieces_string = re.sub(r'[^PNRBQK]', '', self.board)
-        black_pieces_string = re.sub(r'[^pnrbqk]', '', self.board).upper()
-        pawn_difference = abs(len(re.sub(r'[^P]', '', white_pieces_string)) - len(re.sub(r'[^P]', '', black_pieces_string)))
-        bishop_difference = abs(len(re.sub(r'[^B]', '', white_pieces_string)) - len(re.sub(r'[^B]', '', black_pieces_string)))
-        knight_difference = abs(len(re.sub(r'[^N]', '', white_pieces_string)) - len(re.sub(r'[^N]', '', black_pieces_string)))
-        rook_difference = abs(len(re.sub(r'[^R]', '', white_pieces_string)) - len(re.sub(r'[^R]', '', black_pieces_string)))
-        queen_difference = abs(len(re.sub(r'[^Q]', '', white_pieces_string)) - len(re.sub(r'[^Q]', '', black_pieces_string)))
-        king_difference = abs(len(re.sub(r'[^K]', '', white_pieces_string)) - len(re.sub(r'[^K]', '', black_pieces_string)))
-        material_score = weights['K']*king_difference + \
-                         weights['Q']*queen_difference + \
-                         weights['R']*rook_difference + \
-                         weights['N']*knight_difference + \
-                         weights['B']*bishop_difference + \
-                         weights['P']*pawn_difference
-
-        player1_mobility = 0
-        for move in self.genMoves():
-            player1_mobility += 1
-        self.rotate()
-        player2_mobility = 0
-        for move in self.genMoves():
-            player2_mobility += 1
-        self.rotate()
-        mobility_score = weights['Mobility']*(abs(player1_mobility - player2_mobility))
-        if self.turn == 'white':
-            turn_value = 1
-        else:
-            turn_value = -1
-        return (material_score + mobility_score) * turn_value
-
-
-Entry = namedtuple('Entry', 'depth score move')
+Entry = namedtuple('Entry', 'depth score gamma move')
 tp = OrderedDict()
 
 
@@ -335,62 +238,112 @@ tp = OrderedDict()
 ###############################################################################
 
 nodes = 0
+def bound(pos, gamma, depth):
+    """ returns s(pos) <= r < gamma    if s(pos) < gamma
+        returns s(pos) >= r >= gamma   if s(pos) >= gamma """
+    global nodes; nodes += 1
 
-
-###################
-# Minmax with Alpha Beta cut offs
-###################
-def alphabeta(position, depth, alpha, beta):
-    """Returns a tuple (score, bestmove) for the position at the given depth"""
-    # if depth > 0:
-    #    nullscore = -alphabeta(position.rotate(), alpha, beta, depth-3)
-    # else:
-    #    nullscore = position.score
-    if depth == 0:
-        return position.score
-    if len(re.sub(r'[^Kk]', '', position.board)) < 2:
-        return position.score*8
-    entry = tp.get(position)
+    # Look in the table if we have already searched this position before.
+    # We use the table value if it was done with at least as deep a search
+    # as ours, and the gamma value is compatible.
+    entry = tp.get(pos)
     if entry is not None and entry.depth >= depth and (
-            entry.score < beta or entry.score >= alpha):
+            entry.score < entry.gamma and entry.score < gamma or
+            entry.score >= entry.gamma and entry.score >= gamma):
         return entry.score
-    else:
-        if position.turn == "white":
-            bestmove = None
-            for move in sorted(position.genMoves(), key=position.value, reverse=True):
-                if depth <= 0 and position.move(move).score < 150:
-                    break
-                score = alphabeta(position.move(move), depth - 1, alpha, beta)
-                if score > alpha:  # white maximizes his score
-                    alpha = score
-                    bestmove = move
-                    if alpha >= beta:  # alpha-beta cutoff
-                        break
-            tp[position] = Entry(depth, alpha, bestmove)
-            if len(tp) > TABLE_SIZE:
-                tp.popitem()
-            #if bestmove:
-            #    print("\t" * depth, "LEAF: %s%s" % (render(bestmove[0]), render(bestmove[1])))
-            return alpha
-        else:
-            bestmove = None
-            for move in sorted(position.genMoves(), key=position.value, reverse=True):
-                score = alphabeta(position.move(move), depth - 1, alpha, beta)
-                if score < beta:  # black minimizes his score
-                    beta = score
-                    bestmove = move
-                    if alpha >= beta:  # alpha-beta cutoff
-                        break
-            tp[position] = Entry(depth, alpha, bestmove)
-            if len(tp) > TABLE_SIZE:
-                tp.popitem()
-            #if bestmove:
-            #    print("\t" * depth, "LEAF: %s%s" % (render(119-bestmove[0]), render(119-bestmove[1])))
-            return beta
+
+    # Stop searching if we have won/lost.
+    if abs(pos.score) >= MATE_VALUE:
+        return pos.score
+
+    # Null move. Is also used for stalemate checking
+    nullscore = -bound(pos.rotate(), 1-gamma, depth-3) if depth > 0 else pos.score
+    #nullscore = -MATE_VALUE*3 if depth > 0 else pos.score
+    if nullscore >= gamma:
+        return nullscore
+
+    # We generate all possible, pseudo legal moves and order them to provoke
+    # cuts. At the next level of the tree we are going to minimize the score.
+    # This can be shown equal to maximizing the negative score, with a slightly
+    # adjusted gamma value.
+    best, bmove = -3*MATE_VALUE, None
+    for move in sorted(pos.genMoves(), key=pos.value, reverse=True):
+        # We check captures with the value function, as it also contains ep and kp
+        if depth <= 0 and pos.value(move) < 150:
+            break
+        score = -bound(pos.move(move), 1-gamma, depth-1)
+        if score > best:
+            best = score
+            bmove = move
+        if score >= gamma:
+            break
+
+    # If there are no captures, or just not any good ones, stand pat
+    if depth <= 0 and best < nullscore:
+        return nullscore
+    # Check for stalemate. If best move loses king, but not doing anything
+    # would save us. Not at all a perfect check.
+    if depth > 0 and best <= -MATE_VALUE is None and nullscore > -MATE_VALUE:
+        best = 0
+
+    # We save the found move together with the score, so we can retrieve it in
+    # the play loop. We also trim the transposition table in FILO order.
+    # We prefer fail-high moves, as they are the ones we can build our pv from.
+    if entry is None or depth >= entry.depth and best >= gamma:
+        tp[pos] = Entry(depth, best, gamma, bmove)
+        if len(tp) > TABLE_SIZE:
+            tp.popitem()
+    return best
+
+
+def search(pos, maxn=NODES_SEARCHED):
+    """ Iterative deepening MTD-bi search """
+    global nodes; nodes = 0
+
+    # We limit the depth to some constant, so we don't get a stack overflow in
+    # the end game.
+    for depth in range(1, 99):
+        # The inner loop is a binary search on the score of the position.
+        # Inv: lower <= score <= upper
+        # However this may be broken by values from the transposition table,
+        # as they don't have the same concept of p(score). Hence we just use
+        # 'lower < upper - margin' as the loop condition.
+        lower, upper = -3*MATE_VALUE, 3*MATE_VALUE
+        while lower < upper - 3:
+            gamma = (lower+upper+1)//2
+            score = bound(pos, gamma, depth)
+            if score >= gamma:
+                lower = score
+            if score < gamma:
+                upper = score
+        
+        # print("Searched %d nodes. Depth %d. Score %d(%d/%d)" % (nodes, depth, score, lower, upper))
+
+        # We stop deepening if the global N counter shows we have spent too
+        # long, or if we have already won the game.
+        if nodes >= maxn or abs(score) >= MATE_VALUE:
+            break
+
+    # If the game hasn't finished we can retrieve our move from the
+    # transposition table.
+    entry = tp.get(pos)
+    if entry is not None:
+        return entry.move, score
+    return None, score
+
 
 ###############################################################################
 # User interface
 ###############################################################################
+
+# Python 2 compatability
+if sys.version_info[0] == 2:
+    input = raw_input
+
+
+def parse(c):
+    fil, rank = ord(c[0]) - ord('a'), int(c[1]) - 1
+    return A1 + fil - 10*rank
 
 
 def render(i):
@@ -399,39 +352,41 @@ def render(i):
 
 
 def main():
-    pos = Position(initial2, 0, (False, False), (False, False), 0, 0, 'white')
-    # pos = Position(initial, 0, (True, True), (True, True), 0, 0, 'white')
-
-    print(' '.join(pos.board))
-    print("%s turn" % pos.turn)
+    pos = Position(initial, 0, (True,True), (True,True), 0, 0)
     while True:
         # We add some spaces to the board before we print it.
         # That makes it more readable and pleasing.
-        # Fire up the engine to look for a move.
-        move = None
-        start = datetime.datetime.now()
-        score = alphabeta(pos, 10, -3*MATE_VALUE, 3*MATE_VALUE)
-        entry = tp.get(pos)
-        if entry is not None:
-            move = entry.move
-        current_turn = pos.turn
-        pos = pos.move(move)
-        if current_turn == "black":
-            print("%s move:" % current_turn, render(119-move[0]) + render(119-move[1]))
-            print(' '.join(pos.board))
-        else:
-            print("%s move:" % current_turn, render(move[0]) + render(move[1]))
-            print(' '.join(pos.rotate().board))
+        print(' '.join(pos.board))
 
-        if len(re.sub(r'[^Kk]', '', pos.board)) < 2:
-            if score <= -MATE_VALUE:
-                print("Black won")
-            if score >= MATE_VALUE:
-                print("White won")
+        # We query the user until she enters a legal move.
+        move = None
+        move, score = search(pos)
+        if score <= -MATE_VALUE:
+            print("black won")
             break
-        current_turn = pos.turn
-        print("Elapsed time: %s" % (datetime.datetime.now()-start))
-        print("%s turn" % current_turn)
+        if score >= MATE_VALUE:
+            print("white won")
+            break
+        print("My move:", render(move[0]) + render(move[1]))
+        pos = pos.move(move)
+
+        # After our move we rotate the board and print it again.
+        # This allows us to see the effect of our move.
+        print(' '.join(pos.rotate().board))
+
+        # Fire up the engine to look for a move.
+        move, score = search(pos)
+        if score <= -MATE_VALUE:
+            print("black won")
+            break
+        if score >= MATE_VALUE:
+            print("white lost")
+            break
+
+        # The black player moves from a rotated position, so we have to
+        # 'back rotate' the move before printing it.
+        print("My move:", render(119-move[0]) + render(119-move[1]))
+        pos = pos.move(move)
 
 
 if __name__ == '__main__':
